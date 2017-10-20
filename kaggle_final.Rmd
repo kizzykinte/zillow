@@ -1,0 +1,353 @@
+---
+title: "kaggle6"
+author: "Priyanka Dutta"
+date: "October 15, 2017"
+output: html_document
+---
+
+Benchmarking as per 'anokas' starter code kaggle
+
+load data
+```{r}
+p16o = read.csv("properties_2016.csv")
+p17o = read.csv("properties_2017.csv")
+t16o = read.csv("train_2016_v2.csv")
+t17o = read.csv("train_2017.csv")
+
+# reorder parcelIDs in prop17 to match prop16 & submissions file
+p17o = p17o[match(p16o$parcelid, p17o$parcelid),]
+```
+
+prepare for further processing
+```{r}
+rm(list=setdiff(ls(), c("p16o","p17o","t16o","t17o")))
+
+p16 = p16o
+p17 = p17o
+t16 = t16o
+t17 = t17o
+```
+
+fix misleading NAs
+```{r}
+# not all NAs in taxdelinquencyyear are true NAs. Converting the right ones to 0
+p16$taxdelinquencyyear[as.numeric(p16$taxdelinquencyflag)==1 & is.na(p16$taxdelinquencyyear)]=0
+p17$taxdelinquencyyear[as.numeric(p17$taxdelinquencyflag)==1 & is.na(p17$taxdelinquencyyear)]=0
+
+# not all NAs in fireplacecnt are true NAs. Converting the right ones to 0
+p16$fireplacecnt[as.numeric(p16$fireplaceflag)==1 & is.na(p16$fireplacecnt)]=0
+p17$fireplacecnt[as.numeric(p17$fireplaceflag)==1 & is.na(p17$fireplacecnt)]=0
+
+p16$poolcnt[is.na(p16$poolcnt)]=0
+p17$poolcnt[is.na(p17$poolcnt)]=0
+
+p16$poolsizesum[is.na(p16$poolsizesum)]=0
+p17$poolsizesum[is.na(p17$poolsizesum)]=0
+
+p16$pooltypeid2[is.na(p16$pooltypeid2)]=0
+p17$pooltypeid2[is.na(p17$pooltypeid2)]=0
+
+p16$pooltypeid7[is.na(p16$pooltypeid7)]=0
+p17$pooltypeid7[is.na(p17$pooltypeid7)]=0
+```
+
+delete redundant features (step2)
+```{r}
+# bathroomcnt, calculatedbathnbr and fullbathcnt are very similar. bathroomcnt has fewest NAs, so we will delete the other 2
+p16 = subset(p16,select = -c(calculatedbathnbr,fullbathcnt))
+p17 = subset(p17,select = -c(calculatedbathnbr,fullbathcnt))
+
+# calculatedfinishedsquarefeet & finishedsquarefeet12 are the same, calculatedfinishedsquarefeet has fewer NAs. The other area features are also very correlated with calculatedfinishedsquarefeet while having many missing values
+p16 = subset(p16,select = -c(finishedsquarefeet12,finishedsquarefeet13, finishedsquarefeet15,finishedsquarefeet6))
+p17 = subset(p17,select = -c(finishedsquarefeet12,finishedsquarefeet13, finishedsquarefeet15,finishedsquarefeet6))
+
+#finishedsquarefeet50 and finishedfloor1squarefeet are the exactly the same information according to the dictionary descriptions, lets remove finishedsquarefeet50 as it has more missing values
+p16 = subset(p16,select = -c(finishedsquarefeet50))
+p17 = subset(p17,select = -c(finishedsquarefeet50))
+
+# roomcnt seems off
+p16 = subset(p16,select = -c(roomcnt))
+p17 = subset(p17,select = -c(roomcnt))
+
+# cencustractandblock & rawcencustractandblock have the same info, latter has fewer NAs, deleting former
+p16 = subset(p16,select = -c(censustractandblock))
+p17 = subset(p17,select = -c(censustractandblock))
+
+# pooltypeid10(does home have a Spa or hot tub) seems to be inconcistent with the 'hashottuborspa' field - these two fields should have the same information? Deleting 'pooltypeid10' as has more missing values
+p16 = subset(p16,select = -c(pooltypeid10))
+p17 = subset(p17,select = -c(pooltypeid10))
+```
+
+missing value imputation 1 (step 3)
+```{r}
+# taxvaluedollarcnt = structuretaxvaluedollarcnt + landtaxvaluedollarcnt, using this relation to impute some missing values exactly
+# e.g: sum(is.na(p16$structuretaxvaluedollarcnt)) reduces from 54982 to 42550, and landtax from 67733 to 42550
+p16$taxvaluedollarcnt[is.na(p16$taxvaluedollarcnt)]= p16$structuretaxvaluedollarcnt[is.na(p16$taxvaluedollarcnt)]+p16$landtaxvaluedollarcnt[is.na(p16$taxvaluedollarcnt)]
+
+p16$structuretaxvaluedollarcnt[is.na(p16$structuretaxvaluedollarcnt)]= p16$taxvaluedollarcnt[is.na(p16$structuretaxvaluedollarcnt)]-p16$landtaxvaluedollarcnt[is.na(p16$structuretaxvaluedollarcnt)]
+
+p16$landtaxvaluedollarcnt[is.na(p16$landtaxvaluedollarcnt)]= p16$taxvaluedollarcnt[is.na(p16$landtaxvaluedollarcnt)]-p16$structuretaxvaluedollarcnt[is.na(p16$landtaxvaluedollarcnt)]
+
+
+
+p17$taxvaluedollarcnt[is.na(p17$taxvaluedollarcnt)]= p17$structuretaxvaluedollarcnt[is.na(p17$taxvaluedollarcnt)]+p17$landtaxvaluedollarcnt[is.na(p17$taxvaluedollarcnt)]
+
+p17$structuretaxvaluedollarcnt[is.na(p17$structuretaxvaluedollarcnt)]= p17$taxvaluedollarcnt[is.na(p17$structuretaxvaluedollarcnt)]-p17$landtaxvaluedollarcnt[is.na(p17$structuretaxvaluedollarcnt)]
+
+p17$landtaxvaluedollarcnt[is.na(p17$landtaxvaluedollarcnt)]= p17$taxvaluedollarcnt[is.na(p17$landtaxvaluedollarcnt)]-p17$structuretaxvaluedollarcnt[is.na(p17$landtaxvaluedollarcnt)]
+```
+
+additional features (part 4)
+```{r}
+library(data.table)
+library(geosphere)
+
+# # setwd("C:/Work/Kaggle Competition/Zillow")
+# 
+# #prop_2016<-fread("properties_2016.csv")
+# 
+temp<-as.data.table(p16)
+temp2<-as.data.table(p17)
+# 
+# # Life of Property
+# temp<-temp[,N_Age_of_Prop:=2018-yearbuilt,]
+# 
+# # Average Room Size
+# temp<-temp[,N_Avg_room_size:=calculatedfinishedsquarefeet/bedroomcnt,]
+# 
+# # Ratio of built structure to land value
+# temp<-temp[,N_structolandtaxratio:=mean(structuretaxvaluedollarcnt/landtaxvaluedollarcnt,na.rm=TRUE),]
+# temp<-temp[,N_landtaxperunitarea:=landtaxvaluedollarcnt/lotsizesquarefeet,]
+# 
+# # Average Tax by Geographies
+# temp<-temp[,N_AvgLandtax.county:=mean(landtaxvaluedollarcnt/lotsizesquarefeet,na.rm=TRUE),by=c("regionidcounty")]
+# temp<-temp[,N_AvgLandtax.zip:=mean(landtaxvaluedollarcnt/lotsizesquarefeet,na.rm=TRUE),by=c("regionidzip")]
+# temp<-temp[,N_AvgLandtax.FIPS:=mean(landtaxvaluedollarcnt/lotsizesquarefeet,na.rm=TRUE),by=c("fips")]
+# 
+# temp<-temp[,N_Avgtax.county:=mean(taxvaluedollarcnt,na.rm=TRUE),by=c("regionidcounty")]
+# temp<-temp[,N_Avgtax.zip:=mean(taxvaluedollarcnt,na.rm=TRUE),by=c("regionidzip")]
+# temp<-temp[,N_Avgtax.FIPS:=mean(taxvaluedollarcnt,na.rm=TRUE),by=c("fips")]
+# 
+# temp<-temp[,N_NoofProps.county:=length(taxamount),by=c("regionidcounty")]
+# temp<-temp[,N_NoofProps.zip:=length(taxamount),by=c("regionidzip")]
+# temp<-temp[,N_NoofProps.FIPS:=length(taxamount),by=c("fips")]
+# 
+# p16 = as.data.frame(temp)
+
+# p16$new.taxratio = p16$taxamount/p16$taxvaluedollarcnt
+# p17$new.taxratio = p17$taxamount/p17$taxvaluedollarcnt
+
+# p17$new.taxarea = p17$structuretaxvaluedollarcnt/p17$calculatedfinishedsquarefeet
+
+temp<-temp[,new.calcfinsqft.zip:=mean(calculatedfinishedsquarefeet,na.rm=TRUE),by=c("regionidzip")]
+temp2<-temp2[,new.calcfinsqft.zip:=mean(calculatedfinishedsquarefeet,na.rm=TRUE),by=c("regionidzip")]
+
+p16 = as.data.frame(temp)
+p17 = as.data.frame(temp2)
+
+rm(temp,temp2)
+
+p16 = subset(p16, select = -c(regionidzip))
+p17 = subset(p17, select = -c(regionidzip))
+```
+
+remove features missing more than 98% data
+```{r}
+mis16 = sapply(1:dim(p16)[2], function(j) 100*sum(is.na(p16[,j]))/dim(p16)[1])
+mis17 = sapply(1:dim(p17)[2], function(j) 100*sum(is.na(p17[,j]))/dim(p17)[1])
+
+# misssing % slightly different in 16 & 17, but similar. same features are more than 90% missing, removed
+#cbind(mis16,mis17)
+
+p16 = p16[,-which(mis16>98), drop = F]
+p17 = p17[,-which(mis17>98), drop = F]
+```
+
+
+zip code encoding
+```{r}
+
+```
+
+transaction date to month (1-24)
+```{r}
+library(lubridate)
+t16$month = month(as.POSIXlt(t16$transactiondate, format="%m/%d/%Y"))
+t17$month = month(as.POSIXlt(t17$transactiondate, format="%Y-%m-%d")) + 12
+```
+
+
+training set for 2016
+```{r}
+library(dplyr)
+
+p176 = p17
+p176$taxamount = p16$taxamount
+p176$taxvaluedollarcnt = p16$taxvaluedollarcnt
+p176$landtaxvaluedollarcnt = p16$landtaxvaluedollarcnt
+p176$structuretaxvaluedollarcnt = p16$structuretaxvaluedollarcnt
+p176$new.taxratio = p16$new.taxratio
+
+t16 = t16o
+t17 = t17o
+t16 = left_join(t16,p16,by = "parcelid")
+t17 = left_join(t17,p176,by = "parcelid")
+
+xt16 = subset(t16, select = -c(parcelid,logerror,transactiondate,propertyzoningdesc, propertycountylandusecode))
+xt17 = subset(t17, select = -c(parcelid,logerror,transactiondate,propertyzoningdesc, propertycountylandusecode))
+yt16 = t16$logerror
+yt17 = t17$logerror
+```
+
+validation set 2016
+```{r}
+split = 80000
+xv16 = xt16[(split+1):dim(xt16)[1],]
+yv16 = yt16[(split+1):dim(xt16)[1]]
+xt16 = xt16[1:split,]
+yt16 = yt16[1:split]
+
+xt16 = full_join(xt16,xt17)
+yt16 = c(yt16, yt17)
+```
+
+outlier removal 2016: training set only, validation set as is to get better error estimates
+```{r}
+xt16 = xt16[abs(yt16)<.4,]
+yt16 = yt16[abs(yt16)<.4]
+```
+
+xgb Dmatrix 2016
+```{r}
+library(xgboost)
+
+dt16 = xgb.DMatrix(data.matrix(xt16),label = yt16)
+dv16 = xgb.DMatrix(data.matrix(xv16),label = yv16)
+```
+
+xgb parameters 2016
+```{r}
+params = {}
+params['eta'] = .03
+params['objective'] = 'reg:linear'
+params['eval_metric'] = 'mae'
+params['max_depth'] = 8
+params['silent'] = 1
+
+watchlist = list(train = dt16, valid = dv16)
+
+clf16 = xgb.train(as.list(params), dt16, 169, watchlist, early_stopping_rounds = 100, verbose = 10)
+
+```
+
+importance matrix 2016
+```{r}
+importance_matrix <- xgb.importance(colnames(xt16), model = clf16)
+xgb.plot.importance(importance_matrix)
+```
+
+test set 2016
+```{r}
+#p16$month = 11
+tst16 = xgb.DMatrix(data.matrix(subset(p16,select = -c(parcelid,propertyzoningdesc, propertycountylandusecode))))
+```
+
+predictions 2016
+```{r}
+pred16 = predict(clf16,tst16)
+summary(pred16)
+```
+
+training set for 2017
+```{r}
+library(dplyr)
+
+# p176 = p17
+# p176$taxamount = p16$taxamount
+# p176$taxvaluedollarcnt = p16$taxvaluedollarcnt
+# p176$landtaxvaluedollarcnt = p16$landtaxvaluedollarcnt
+# p176$structuretaxvaluedollarcnt = p16$structuretaxvaluedollarcnt
+
+t16 = t16o
+t17 = t17o
+
+t16 = left_join(t16,p16,by = "parcelid")
+t17 = left_join(t17,p17,by = "parcelid")
+
+xt16 = subset(t16, select = -c(parcelid,logerror,transactiondate,propertyzoningdesc, propertycountylandusecode))
+xt17 = subset(t17, select = -c(parcelid,logerror,transactiondate,propertyzoningdesc, propertycountylandusecode))
+yt16 = t16$logerror
+yt17 = t17$logerror
+```
+
+validation set 2017
+```{r}
+split = 50000
+xv17 = xt17[(split+1):dim(xt17)[1],]
+yv17 = yt17[(split+1):dim(xt17)[1]]
+xt17 = xt17[1:split,]
+yt17 = yt17[1:split]
+
+xt17 = full_join(xt16,xt17)
+yt17 = c(yt16, yt17)
+```
+
+outlier removal 2017: training set only, validation set as is to get better error estimates
+```{r}
+xt17 = xt17[abs(yt17)<.4,]
+yt17 = yt17[abs(yt17)<.4]
+```
+
+xgb Dmatrix 2017
+```{r}
+library(xgboost)
+
+dt17 = xgb.DMatrix(data.matrix(xt17),label = yt17)
+dv17 = xgb.DMatrix(data.matrix(xv17),label = yv17)
+```
+
+xgb parameters 2017
+```{r}
+# anokas params: eta = .02, depth = 4
+
+params = {}
+params['eta'] = .03
+params['objective'] = 'reg:linear'
+params['eval_metric'] = 'mae'
+params['max_depth'] = 8
+params['silent'] = 1
+
+watchlist = list(train = dt17, valid = dv17)
+
+clf17 = xgb.train(as.list(params), dt17, 183, watchlist, early_stopping_rounds = 100, verbose = 10)
+
+```
+
+importance matrix 2017
+```{r}
+importance_matrix <- xgb.importance(colnames(xt17), model = clf17)
+xgb.plot.importance(importance_matrix)
+```
+
+test set
+```{r}
+#p16$month = 11
+tst17 = xgb.DMatrix(data.matrix(subset(p17,select = -c(parcelid,propertyzoningdesc, propertycountylandusecode))))
+```
+
+
+predictions
+```{r}
+pred17 = predict(clf17,tst17)
+summary(pred17)
+```
+
+output file
+```{r}
+output = data.frame(p16$parcelid, pred16, pred16, pred16,pred17,pred17,pred17)
+colnames(output) = c("ParcelId", "201610", "201611", "201612", "201710", "201711", "201712"  )
+write.csv(output, file = "sample_submission10162017_10.csv", row.names = F)
+```
+
+
+

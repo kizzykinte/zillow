@@ -1,0 +1,131 @@
+---
+title: "EDA"
+author: "Priyanka Dutta"
+date: "October 10, 2017"
+output: html_document
+---
+
+compare properties data for 2016 & 2017
+```{r}
+
+# load properties data
+prop16 = read.csv(properties_2016.csv)
+prop17 = read.csv("properties_2017.csv")
+
+# reorder parcelIDs in prop17 to match prop16 & submissions file
+prop17 = prop17[match(prop16$parcelid, prop17$parcelid),]
+
+# experiments
+setdiff(prop16$parcelid,prop17$parcelid)
+setdiff(colnames(prop16),colnames(prop17))
+colSums(is.na(prop17)) -  colSums(is.na(prop16))
+
+# results
+# both datasets have 2985217 observations of 58 features
+# the setdiff commands reveal that both datasets have the exact same parcelids, as well as the same columns/features, as expected
+# the colSums command reveals that prop17 has fewer NAs (more data) except in case of most of the area features
+```
+
+compare transactions data for 2016 & 2017
+```{r}
+# load data
+tran16 = read.csv("train_2016_v2.csv")
+tran17 = read.csv("train_2017.csv")
+
+# experiments
+
+length(unique(c(tran16$parcelid,tran17$parcelid)))
+## The length command shows that combining tran16 & tran17, there are a total of 167888 transactions, with 165210 unique parcelids. For tran16, 90150 of 90275 parcelids are unique. For tran17, 77414 of 77613 parcelids are unique.Therefore 2354 (=167564-165210) parcelids are common between 2016 & 2017.
+
+library(lubridate)     # formatting transaction dates (dates to month and year features)
+tran16$month = month(as.POSIXlt(tran16$transactiondate, format="%m/%d/%Y"))
+tran17$month = month(as.POSIXlt(tran17$transactiondate, format="%Y-%m-%d"))
+
+tran16$year = year(as.POSIXlt(tran16$transactiondate, format="%m/%d/%Y"))
+tran17$year = year(as.POSIXlt(tran17$transactiondate, format="%Y-%m-%d"))
+
+tran16 = subset(tran16,select = -c(transactiondate))
+tran17 = subset(tran17,select = -c(transactiondate))
+
+hist(tran16$month)
+hist(tran17$month)
+## the histograms show that tran16 has most transactions mid-year, fewer in the begining and very few at the end. tran17 also has most transactions in June, fewer in the begining and end (September)
+
+plot(tran16$month, tran16$logerror)
+plot(tran16$month, abs(tran16$logerror))
+plot(1:12,sapply(1:12, function(i) mean(abs(tran16$logerror[tran16$month == i]))))
+
+plot(tran17$month, tran17$logerror)
+plot(tran17$month, abs(tran17$logerror))
+plot(1:12,sapply(1:12, function(i) mean(abs(tran17$logerror[tran17$month == i]))))
+
+## absolute log error varies with months, average absolute logerror low between May-November in tran16. In tran17, avg. abs. logerror is low between March -July, higher else where. Lower sampling in Sepetember 2017 could be a reason for this. So maybe I should split date into two features: month and year, for as a single month feature varying between 1-24.
+
+```
+
+all transactions
+```{r}
+library(dplyr)
+all_tran = full_join(tran16,tran17)
+```
+
+histogram of log errors
+```{r}
+hist(all_tran$logerror, breaks = 10)
+summary(all_tran$logerror)
+mean(abs(all_tran$logerror))
+
+## for combined transaction data, median(logerror) = 0.00600, mean(logerror) = 0.01391, mean(abs(logerror)) =  0.06922484.
+```
+
+logerrors with months
+```{r}
+plot(tran16$month, tran16$logerror, col = "red")
+# par(new = T)
+points(tran17$month, tran17$logerror, col = "green")
+```
+
+logerrors with months 2 (outlier location)
+```{r}
+boxplot(tran16$logerror ~ tran16$month, range = 10)
+boxplot(abs(tran16$logerror) ~ tran16$month, range = 10)
+```
+
+logerror trends with months (1-12 scale)
+```{r}
+plot(1:12, sapply(1:12, function(i) mean(abs(tran16$logerror[tran16$month == i]))), col = "red")
+points(1:12, sapply(1:12, function(i) mean(abs(tran17$logerror[tran17$month == i]))), col = "green")
+
+# logerrors for August and september very different b/w 2016 and 2017
+```
+
+logerror trends with months 2 (1-24 scale)
+```{r}
+plot(1:24, sapply(1:24, function(i) mean(abs(tran16$logerror[tran16$month == i]))), col = "red")
+points(13:24, sapply(1:12, function(i) mean(abs(tran17$logerror[tran17$month == i]))), col = "green")
+```
+
+exploring missingness of features
+```{r}
+mis16 = sapply(1:dim(prop16)[2], function(j) 100*sum(is.na(prop16[,j]))/dim(prop16)[1])
+mis17 = sapply(1:dim(prop17)[2], function(j) 100*sum(is.na(prop17[,j]))/dim(prop17)[1])
+
+cbind(mis16,mis17) # display missingness of 2016 & 2017 features side by side
+
+## misssing % slightly different in 16 & 17, but similar. Same features are more than 90% missing, potentially to be removed in final computations. Interestingly some features are more missing in 2017. To avoid confusion, we will use the 2016 features for 2016 predictions and 2017 features for 2017 predictions.
+```
+
+correlation plots
+```{r}
+library(corrplot)
+corrplot(cor(data.matrix(prop16[,-which(mis16>10), drop = F]), use = "complete.obs"))
+
+##  If 'use' is '"complete.obs"' then missing values are handled by casewise deletion (and if there are no complete cases, that gives an error). In general, room counts, area parameters and tax values show good correlation, as expected.Adding logerror to the mix reveals that none of the parameters are stronly correlated to logerror, which is expected, as the Zillow model is already doing a good job
+```
+
+pairs plots
+```{r}
+pairs(prop16[,-which(mis16>1), drop = F])
+```
+
+
